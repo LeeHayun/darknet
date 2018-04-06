@@ -1,0 +1,7 @@
+classes= 3
+train = data/KITTI/ImageSets/train.txt
+valid = data/KITTI/ImageSets/val.txt
+names = data/kitti.names
+backup = /root/backup
+eval=kitti
+

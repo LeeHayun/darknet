@@ -59,15 +59,26 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     double time;
     int count = 0;
     //while(i*imgs < N*120){
+    char *type = option_find_str(options, "eval", "voc");
     while(get_current_batch(net) < net->max_batches){
         if(l.random && count++%10 == 0){
             printf("Resizing\n");
-            int dim = (rand() % 10 + 10) * 32;
-            if (get_current_batch(net)+200 > net->max_batches) dim = 608;
-            //int dim = (rand() % 4 + 16) * 32;
-            printf("%d\n", dim);
-            args.w = dim;
-            args.h = dim;
+            //int dim = (rand() % 10 + 10) * 32;
+            int dim;
+            if (0==strcmp(type, "kitti")) {
+                dim = (rand() % 14 + 14) * 62;
+                if (get_current_batch(net)+200 > net->max_batches) dim = 1674;
+                printf("%d %d\n", dim, (int)(dim*376/1240));
+                args.w = dim;
+                args.h = (int)(dim*376/1240);
+            } else {
+                dim = (rand() % 10 + 10) * 32;
+                if (get_current_batch(net)+200 > net->max_batches) dim = 608;
+                //int dim = (rand() % 4 + 16) * 32;
+                printf("%d\n", dim);
+                args.w = dim;
+                args.h = dim;
+            }
 
             pthread_join(load_thread, 0);
             train = buffer;
@@ -76,7 +87,8 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
 
             #pragma omp parallel for
             for(i = 0; i < ngpus; ++i){
-                resize_network(nets[i], dim, dim);
+                //resize_network(nets[i], dim, dim);
+                resize_network(nets[i], args.w, args.h);
             }
             net = nets[0];
         }
