@@ -66,9 +66,9 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
             //int dim = (rand() % 10 + 10) * 32;
             int dim;
             if (0==strcmp(type, "kitti")) {
-                dim = (rand() % 14 + 14) * 62;
-                if (get_current_batch(net)+200 > net->max_batches) dim = 1674;
-                printf("%d %d\n", dim, (int)(dim*376/1240));
+                dim = (rand() % 18 + 18) * 52;
+                if (get_current_batch(net)+200 > net->max_batches) dim = 1942/2;
+                printf("%d %d\n", dim, (int)(dim*375/1242));
                 args.w = dim;
                 args.h = (int)(dim*376/1240);
             } else {
@@ -196,6 +196,28 @@ static void print_cocos(FILE *fp, char *image_path, detection *dets, int num_box
 
         for(j = 0; j < classes; ++j){
             if (dets[i].prob[j]) fprintf(fp, "{\"image_id\":%d, \"category_id\":%d, \"bbox\":[%f, %f, %f, %f], \"score\":%f},\n", image_id, coco_ids[j], bx, by, bw, bh, dets[i].prob[j]);
+        }
+    }
+}
+
+// HAYUN
+static void print_kitti(FILE *fp, char **names, detection *dets, int total, int classes, int w, int h)
+{
+    int i, j;
+    for(i = 0; i < total; ++i){
+        float xmin = dets[i].bbox.x - dets[i].bbox.w/2. + 1;
+        float xmax = dets[i].bbox.x + dets[i].bbox.w/2. + 1;
+        float ymin = dets[i].bbox.y - dets[i].bbox.h/2. + 1;
+        float ymax = dets[i].bbox.y + dets[i].bbox.h/2. + 1;
+
+        if (xmin < 1) xmin = 1;
+        if (ymin < 1) ymin = 1;
+        if (xmax > w) xmax = w;
+        if (ymax > h) ymax = h;
+
+        for(j = 0; j < classes; ++j){
+            if (dets[i].prob[j]) fprintf(fp, "%s -1 -1 0.0 %.2f %.2f %.2f %.2f "
+                "0.0 0.0 0.0 0.0 0.0 0.0 0.0 %.3f\n", names[j], xmin, ymin, xmax, ymax, dets[i].prob[j]);
         }
     }
 }
@@ -372,6 +394,55 @@ void validate_detector_flip(char *datacfg, char *cfgfile, char *weightfile, char
     fprintf(stderr, "Total Detection Time: %f Seconds\n", what_time_is_it_now() - start);
 }
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <errno.h>
+
+/*
+static void get_directory_path(char *str, char *output)
+{
+    char buffer[4096] = {0};
+    char *p;
+    int i;
+
+    sprintf(buffer, "%s", str);
+    for(i = strlen(buffer); i>0; i--){
+        if (*p == '/')
+          break;
+    }
+    *p = '\0';
+
+    sprintf(output, "%s", buffer);
+}
+*/
+
+static int mkdirs(const char *path, mode_t mode)
+{
+    char tmp_path[4096];
+    const char *tmp = path;
+    int len = 0;
+    int ret;
+
+    if (path == NULL || strlen(path) >= 4096)
+      return -1;
+
+    while ((tmp = strchr(tmp, '/')) != NULL) {
+        len = tmp - path;
+        tmp++;
+        if (len == 0)
+          continue;
+
+        strncpy(tmp_path, path, len);
+        tmp_path[len] = '\0';
+
+        if ((ret = mkdir(tmp_path, mode)) == -1)
+            if (errno != EEXIST)
+              return -1;
+    }
+
+    return 0;
+}
 
 void validate_detector(char *datacfg, char *cfgfile, char *weightfile, char *outfile)
 {
@@ -402,6 +473,7 @@ void validate_detector(char *datacfg, char *cfgfile, char *weightfile, char *out
     FILE **fps = 0;
     int coco = 0;
     int imagenet = 0;
+    int kitti = 0;
     if(0==strcmp(type, "coco")){
         if(!outfile) outfile = "coco_results";
         snprintf(buff, 1024, "%s/%s.json", prefix, outfile);
@@ -414,6 +486,22 @@ void validate_detector(char *datacfg, char *cfgfile, char *weightfile, char *out
         fp = fopen(buff, "w");
         imagenet = 1;
         classes = 200;
+    } else if(0==strcmp(type, "kitti")){ // HAYUN
+        char buff_prefix[1024];
+        if(!outfile) outfile = "";
+        fps = calloc(plist->size, sizeof(FILE *));
+        snprintf(buff_prefix, 1024, "%s/%s", prefix, outfile);
+        for(j = 0; j < plist->size; ++j){
+            snprintf(buff, 1024, "%s", paths[j]);
+            find_replace(buff, "data/KITTI/training/images", buff_prefix, buff);
+            find_replace(buff, ".png", ".txt", buff);
+            fps[j] = fopen(buff, "w");
+            if (fps[j] == NULL) {
+                mkdirs(buff, 0700);
+                fps[j] = fopen(buff, "w");
+            }
+        }
+        kitti = 1;
     } else {
         if(!outfile) outfile = "comp4_det_test_";
         fps = calloc(classes, sizeof(FILE *));
@@ -429,7 +517,7 @@ void validate_detector(char *datacfg, char *cfgfile, char *weightfile, char *out
     int t;
 
     float thresh = .005;
-    float nms = .45;
+    float nms = .4; //.45;
 
     int nthreads = 4;
     image *val = calloc(nthreads, sizeof(image));
@@ -478,6 +566,8 @@ void validate_detector(char *datacfg, char *cfgfile, char *weightfile, char *out
                 print_cocos(fp, path, dets, nboxes, classes, w, h);
             } else if (imagenet){
                 print_imagenet_detections(fp, i+t-nthreads+1, dets, nboxes, classes, w, h);
+            } else if (kitti){ // HAYUN
+                print_kitti(fps[i+t-nthreads], names, dets, nboxes, classes, w, h);
             } else {
                 print_detector_detections(fps, id, dets, nboxes, classes, w, h);
             }
@@ -487,8 +577,14 @@ void validate_detector(char *datacfg, char *cfgfile, char *weightfile, char *out
             free_image(val_resized[t]);
         }
     }
-    for(j = 0; j < classes; ++j){
-        if(fps) fclose(fps[j]);
+    if (kitti){
+        for(j = 0; j < plist->size; ++j){
+          if(fps) fclose(fps[j]);
+        }
+    } else {
+        for(j = 0; j < classes; ++j){
+            if(fps) fclose(fps[j]);
+        }
     }
     if(coco){
         fseek(fp, -2, SEEK_CUR); 
